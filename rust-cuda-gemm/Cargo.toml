@@ -1,0 +1,18 @@
+[package]
+name = "cuda-gemm-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]  # 生成動態庫供 Java 調用
+
+[dependencies]
+cudarc = { version = "0.12", features = [
+    "cublas",
+    "driver",
+    "cuda-version-from-build-system"
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
