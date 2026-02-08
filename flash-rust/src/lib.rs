@@ -32,16 +32,15 @@ fn try_init() -> Result<GemmContext, Box<dyn std::error::Error>> {
 
 /// C ABI: 執行單精度矩陣乘法 (SGEMM) - ROW-MAJOR 版本
 ///
-/// 輸入/輸出矩陣都是 row-major 佈局
 /// C = alpha * A * B + beta * C
 ///
 /// # 參數
-/// - m, n, k: 矩陣維度 (A: m×k, B: k×n, C: m×n)
-/// - a, b, c: row-major 矩陣數據
-///
-/// # 實現細節
-/// cuBLAS 使用 column-major，所以我們用 "row-major trick":
-/// (A × B)_row = (B^T × A^T)_col
+/// - m: A 的行數, C 的行數
+/// - n: B 的列數, C 的列數
+/// - k: A 的列數, B 的行數
+/// - A: m × k 矩陣 (row-major)
+/// - B: k × n 矩陣 (row-major)
+/// - C: m × n 矩陣 (row-major)
 #[no_mangle]
 pub extern "C" fn gemm_sgemm(
     ctx: *mut GemmContext,
@@ -96,50 +95,61 @@ fn try_gemm(
     let b_dev = ctx.device.htod_sync_copy(b_slice)?;
     let mut c_dev = ctx.device.htod_sync_copy(c_slice)?;
 
-    // Row-major trick 正確實作：
+    // ================================================================
+    // Row-major to Column-major 轉換
+    // ================================================================
     //
-    // 我們要算: C(m×n) = A(m×k) × B(k×n)  [row-major]
+    // 問題：cuBLAS 使用 column-major，Java/C 使用 row-major
     //
-    // Row-major 矩陣在記憶體中的排列，如果用 column-major 來讀：
-    // - A(m×k) row-major = A^T(k×m) column-major
-    // - B(k×n) row-major = B^T(n×k) column-major
-    // - C(m×n) row-major = C^T(n×m) column-major
+    // 關鍵觀察：
+    // - Row-major 的 A(m×k) 在記憶體中 = Column-major 的 A^T(k×m)
     //
-    // 我們需要: C^T = (A×B)^T = B^T × A^T
+    // 我們要計算: C = A × B (row-major)
     //
-    // 所以 cuBLAS 調用: C^T(n×m) = B^T(n×k) × A^T(k×m)
-    //                   ↑         ↑          ↑
-    //                gemm output  gemm A     gemm B
+    // 技巧：C^T = (A × B)^T = B^T × A^T
     //
-    // cuBLAS gemm: C = α*op(A)*op(B) + β*C
-    // 這裡 op(A)=B^T, op(B)=A^T, 但因為記憶體已經是轉置的排列，
-    // 所以 transa=N, transb=N (不需要額外轉置！)
+    // 由於記憶體佈局的關係：
+    // - 把 row-major 的 B(k×n) 當作 column-major 讀，得到 B^T(n×k)
+    // - 把 row-major 的 A(m×k) 當作 column-major 讀，得到 A^T(k×m)
+    // - 計算 B^T × A^T = C^T(n×m) in column-major
+    // - 把 column-major 的 C^T(n×m) 當作 row-major 讀，得到 C(m×n)
+    //
+    // cuBLAS gemm: C_out = α * A_cublas * B_cublas + β * C_out
+    //
+    // 對應關係：
+    // - A_cublas = B (我們的 B，被讀成 B^T)，維度 n × k
+    // - B_cublas = A (我們的 A，被讀成 A^T)，維度 k × m
+    // - C_out = C (被讀成 C^T)，維度 n × m
+    //
+    // ================================================================
 
     let cfg = GemmConfig {
+        // 不需要轉置，因為記憶體佈局差異已經隱含了轉置
         transa: cudarc::cublas::sys::cublasOperation_t::CUBLAS_OP_N,
         transb: cudarc::cublas::sys::cublasOperation_t::CUBLAS_OP_N,
 
-        // C^T 是 n×m
-        m: n,
-        n: m,
-        k: k,
+        // cuBLAS 的 m, n, k（注意：這是 column-major 視角）
+        // A_cublas(n×k) × B_cublas(k×m) = C_out(n×m)
+        m: n,  // C_out 的行數
+        n: m,  // C_out 的列數
+        k: k,  // 共同維度
 
         alpha,
 
-        // B 作為 cuBLAS 的 "A": B^T(n×k) column-major, lda = n
+        // lda = A_cublas 的 leading dimension = n（因為 A_cublas 是 n×k）
         lda: n,
 
-        // A 作為 cuBLAS 的 "B": A^T(k×m) column-major, ldb = k
+        // ldb = B_cublas 的 leading dimension = k（因為 B_cublas 是 k×m）
         ldb: k,
 
         beta,
 
-        // C^T(n×m) column-major, ldc = n
+        // ldc = C_out 的 leading dimension = n（因為 C_out 是 n×m）
         ldc: n,
     };
 
     unsafe {
-        // 注意順序：B 是 cuBLAS 的第一個矩陣，A 是第二個
+        // 注意參數順序：B 是 cuBLAS 的 A，A 是 cuBLAS 的 B
         ctx.cublas.gemm(cfg, &b_dev, &a_dev, &mut c_dev)?;
     }
 
@@ -195,14 +205,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gemm_row_major() {
+    fn test_gemm_2x2() {
         let ctx = gemm_init();
         assert!(!ctx.is_null());
 
-        // Row-major 2×2 矩陣
         // A = [1 2]    B = [5 6]
         //     [3 4]        [7 8]
-        let a = vec![1.0f32, 2.0, 3.0, 4.0];  // row-major
+        //
+        // C = A × B = [1*5+2*7  1*6+2*8] = [19 22]
+        //             [3*5+4*7  3*6+4*8]   [43 50]
+        let a = vec![1.0f32, 2.0, 3.0, 4.0];
         let b = vec![5.0f32, 6.0, 7.0, 8.0];
         let mut c = vec![0.0f32; 4];
 
@@ -212,15 +224,77 @@ mod tests {
 
         assert!(matches!(status, GemmStatus::Success));
 
-        // 期望結果 (row-major):
-        // C = A×B = [19 22]  →  {19, 22, 43, 50}
-        //           [43 50]
         let expected = vec![19.0, 22.0, 43.0, 50.0];
+        for (i, (&result, &expect)) in c.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (result - expect).abs() < 1e-5,
+                "Mismatch at index {}: got {}, expected {}",
+                i, result, expect
+            );
+        }
+
+        gemm_destroy(ctx);
+    }
+
+    #[test]
+    fn test_gemm_identity() {
+        let ctx = gemm_init();
+        assert!(!ctx.is_null());
+
+        // I × B = B
+        let identity = vec![1.0f32, 0.0, 0.0, 1.0];
+        let b = vec![5.0f32, 6.0, 7.0, 8.0];
+        let mut c = vec![0.0f32; 4];
+
+        let status = gemm_sgemm(ctx, 2, 2, 2, 1.0,
+                                identity.as_ptr(), b.as_ptr(),
+                                0.0, c.as_mut_ptr());
+
+        assert!(matches!(status, GemmStatus::Success));
+
+        for (i, (&result, &expect)) in c.iter().zip(b.iter()).enumerate() {
+            assert!(
+                (result - expect).abs() < 1e-5,
+                "Mismatch at index {}: got {}, expected {}",
+                i, result, expect
+            );
+        }
+
+        gemm_destroy(ctx);
+    }
+
+    #[test]
+    fn test_gemm_non_square() {
+        let ctx = gemm_init();
+        assert!(!ctx.is_null());
+
+        // A (3×2) × B (2×4) = C (3×4)
+        // A = [1 2]
+        //     [3 4]
+        //     [5 6]
+        // B = [1 2 3 4]
+        //     [5 6 7 8]
+        let a = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let b = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let mut c = vec![0.0f32; 12];
+
+        let status = gemm_sgemm(ctx, 3, 4, 2, 1.0,
+                                a.as_ptr(), b.as_ptr(),
+                                0.0, c.as_mut_ptr());
+
+        assert!(matches!(status, GemmStatus::Success));
+
+        // C = [1*1+2*5  1*2+2*6  1*3+2*7  1*4+2*8]   [11 14 17 20]
+        //     [3*1+4*5  3*2+4*6  3*3+4*7  3*4+4*8] = [23 30 37 44]
+        //     [5*1+6*5  5*2+6*6  5*3+6*7  5*4+6*8]   [35 46 57 68]
+        let expected = vec![11.0, 14.0, 17.0, 20.0,
+                           23.0, 30.0, 37.0, 44.0,
+                           35.0, 46.0, 57.0, 68.0];
 
         for (i, (&result, &expect)) in c.iter().zip(expected.iter()).enumerate() {
             assert!(
                 (result - expect).abs() < 1e-5,
-                "Mismatch at index {}: {} != {}",
+                "Mismatch at index {}: got {}, expected {}",
                 i, result, expect
             );
         }
