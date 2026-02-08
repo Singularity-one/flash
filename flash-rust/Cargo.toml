@@ -8,12 +8,11 @@ name = "flash"
 crate-type = ["cdylib"]
 
 [dependencies]
-cudarc = { version = "0.12", features = [
-    "cublas",
-    "driver",
-    "cuda-version-from-build-system"
-] }
+cudarc = { version = "0.12", features = ["cublas", "cuda-12060"] }
+
+[dev-dependencies]
+serial_test = "3.0"
 
 [profile.release]
-opt-level = 3
 lto = true
+opt-level = 3
