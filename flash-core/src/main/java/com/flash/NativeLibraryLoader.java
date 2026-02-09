@@ -1,6 +1,8 @@
 package com.flash;
 
 import java.io.*;
+import java.lang.foreign.Arena;
+import java.lang.foreign.SymbolLookup;
 import java.nio.file.*;
 
 /**
@@ -19,6 +21,7 @@ public class NativeLibraryLoader {
 
     private static final String LIB_NAME = "flash";
     private static Path extractedLibPath = null;
+    private static SymbolLookup library = null;
 
     /**
      * Loads and returns the path to the native library.
@@ -67,6 +70,26 @@ public class NativeLibraryLoader {
                         "  2. java.library.path: " + systemPath + "\n\n" +
                         "Did you run the build script? (build.ps1 or build.sh)"
         );
+    }
+
+    /**
+     * Gets the SymbolLookup for the native library.
+     *
+     * @return SymbolLookup instance
+     * @throws RuntimeException if library cannot be loaded
+     */
+    public static synchronized SymbolLookup getLibrary() {
+        if (library != null) {
+            return library;
+        }
+
+        try {
+            Path libPath = loadLibrary();
+            library = SymbolLookup.libraryLookup(libPath, Arena.global());
+            return library;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load native library", e);
+        }
     }
 
     private static String getLibraryFileName() {

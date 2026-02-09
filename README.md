@@ -20,3 +20,23 @@ cd ../java-gemm-client && mvn clean compile
 cd java-gemm-client
 mvn test
 ```
+
+### 開發步驟
+```bash
+cd D:\gitHub\flash\flash-rust
+cargo clean
+cargo build --release
+cargo test -- --test-threads=1 --nocapture
+cd ..
+ .\build.ps1
+mvn test
+```
+
+### Phase 1
+```bash
+未完成
+BLAS Level 1
+BLAS Level 2 
+BLAS Level 3 
+cudarc 0.12.1 確實沒有導出 Level-1 BLAS 的 FFI 
+```

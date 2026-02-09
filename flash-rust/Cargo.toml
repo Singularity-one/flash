@@ -8,7 +8,8 @@ name = "flash"
 crate-type = ["cdylib"]
 
 [dependencies]
-cudarc = { version = "0.12", features = ["cublas", "cuda-12060"] }
+cudarc = { version = "0.12", features = ["cublas", "cuda-12060", "f16"] }
+half = "2.4"
 
 [dev-dependencies]
 serial_test = "3.0"
