@@ -1,4 +1,4 @@
-// Phase 2: Modular architecture with multi-precision support
+// Phase 3: Modular architecture with multi-precision support
 //
 // This file serves as the main entry point, re-exporting all C ABI functions
 // from individual modules.
@@ -7,7 +7,8 @@ mod device;
 mod tensor;  // Phase 1: Multi-precision tensor support
 mod blas;
 mod gemm;
-mod dnn;     // Phase 2: cuDNN primitives
+mod dnn;     // Phase 2: DNN primitives (CPU fallback)
+mod rand;    // Phase 3: cuRAND wrapper
 
 // Re-export device functions
 pub use device::{
@@ -58,4 +59,15 @@ pub use dnn::{
     dnn_softmax_forward,
     dnn_activation_forward,
     dnn_activation_backward,
+};
+
+// Re-export RAND functions (Phase 3)
+pub use rand::{
+    rand_init,
+    rand_init_with_seed,
+    rand_destroy,
+    rand_set_seed,
+    rand_uniform,
+    rand_normal,
+    rand_uniform_range,
 };

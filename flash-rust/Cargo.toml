@@ -1,6 +1,6 @@
 [package]
 name = "flash"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [lib]
@@ -8,9 +8,8 @@ name = "flash"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Note: cudnn feature removed - using CPU fallback for DNN operations
-# Add "cudnn" feature when cuDNN 9.x is installed
-cudarc = { version = "0.12", features = ["cublas", "cuda-12060", "f16"] }
+# Phase 3: Added curand feature for random number generation
+cudarc = { version = "0.12", features = ["cublas", "curand", "cuda-12060", "f16"] }
 half = "2.4"
 
 [dev-dependencies]
