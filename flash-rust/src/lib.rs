@@ -1,4 +1,4 @@
-// Phase 3: Modular architecture with multi-precision support
+// Phase 4: Modular architecture with multi-precision support
 //
 // This file serves as the main entry point, re-exporting all C ABI functions
 // from individual modules.
@@ -9,6 +9,7 @@ mod blas;
 mod gemm;
 mod dnn;     // Phase 2: DNN primitives (CPU fallback)
 mod rand;    // Phase 3: cuRAND wrapper
+mod ops;     // Phase 4: Element-wise operations
 
 // Re-export device functions
 pub use device::{
@@ -70,4 +71,38 @@ pub use rand::{
     rand_uniform,
     rand_normal,
     rand_uniform_range,
+};
+
+// Re-export OPS functions (Phase 4)
+pub use ops::{
+    // Binary operations
+    ops_add,
+    ops_sub,
+    ops_mul,
+    ops_div,
+    // Unary operations
+    ops_exp,
+    ops_log,
+    ops_sqrt,
+    ops_tanh,
+    ops_sigmoid,
+    ops_relu,
+    ops_gelu,
+    ops_silu,
+    ops_pow,
+    ops_neg,
+    ops_abs,
+    // Scalar operations
+    ops_scale,
+    ops_fill,
+    // Reduction operations
+    ops_sum,
+    ops_max,
+    ops_min,
+    ops_mean,
+    // Cast operation
+    ops_cast,
+    // In-place operations
+    ops_axpy,
+    ops_clip,
 };
